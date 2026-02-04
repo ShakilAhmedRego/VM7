@@ -3,20 +3,16 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { getSupabase } from "@/lib/supabase"
-import { Shield, Upload, Users, Database, LogOut, Coins } from "lucide-react"
+import { Upload, Users, Database, LogOut, Coins } from "lucide-react"
 
 interface Lead {
   id: string
   company_name: string
   contact_name: string
   email: string
-  phone: string
   industry: string
   location: string
-  company_size: string
-  revenue_range: string
   capital_need: string
-  status: string
 }
 
 interface UserRow {
@@ -26,7 +22,6 @@ interface UserRow {
   company: string
   credits: number
   role: string
-  status: string
 }
 
 export default function AdminPage() {
@@ -37,19 +32,18 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState("")
-  const [msgType, setMsgType] = useState<"success" | "error">("success")
   const [grantUserId, setGrantUserId] = useState("")
   const [grantAmount, setGrantAmount] = useState("")
 
   useEffect(() => {
-    checkAndLoad()
+    init()
   }, [])
 
-  async function checkAndLoad() {
+  async function init() {
     const supabase = getSupabase()
 
-    const { data: sessionData } = await supabase.auth.getSession()
-    const session = sessionData?.session
+    const { data } = await supabase.auth.getSession()
+    const session = data?.session
 
     if (!session) {
       router.push("/login")
@@ -58,22 +52,22 @@ export default function AdminPage() {
 
     const userId = session.user.id
 
-    const { data: profile, error } = await supabase
+    const { data: profile } = await supabase
       .from("user_profiles")
       .select("role")
       .eq("id", userId)
       .single()
 
-    if (error || !profile || profile.role !== "admin") {
+    if (!profile || profile.role !== "admin") {
       router.push("/dashboard")
       return
     }
 
-    await fetchData()
+    await loadData()
     setLoading(false)
   }
 
-  async function fetchData() {
+  async function loadData() {
     const supabase = getSupabase()
 
     const { data: leadsData } = await supabase
@@ -81,20 +75,19 @@ export default function AdminPage() {
       .select("*")
       .order("created_date", { ascending: false })
 
-    if (leadsData) setLeads(leadsData as Lead[])
+    if (leadsData) setLeads(leadsData)
 
     const { data: usersData } = await supabase
       .from("user_profiles")
       .select("*")
       .order("created_at", { ascending: false })
 
-    if (usersData) setUsers(usersData as UserRow[])
+    if (usersData) setUsers(usersData)
   }
 
-  function showMsg(text: string, type: "success" | "error") {
+  function flash(text: string) {
     setMsg(text)
-    setMsgType(type)
-    setTimeout(() => setMsg(""), 4000)
+    setTimeout(() => setMsg(""), 3000)
   }
 
   function handleCSV(e: React.ChangeEvent<HTMLInputElement>) {
@@ -103,183 +96,44 @@ export default function AdminPage() {
 
     const reader = new FileReader()
 
-    reader.onload = async event => {
-      try {
-        const text = String(event.target?.result || "")
-        const lines = text.split("\n").filter(l => l.trim())
+    reader.onload = async ev => {
+      const text = String(ev.target?.result || "")
+      const rows = text.split("\n").filter(r => r.trim())
 
-        if (lines.length < 2) {
-          showMsg("CSV must include headers + rows", "error")
-          return
+      if (rows.length < 2) return flash("Invalid CSV")
+
+      const headers = rows[0].split(",").map(h => h.toLowerCase().trim())
+
+      const val = (r: string[], name: string) =>
+        r[headers.indexOf(name)] || ""
+
+      const batch = rows.slice(1).map((r, i) => {
+        const c = r.split(",")
+        return {
+          lead_id: `LEAD-${Date.now()}-${i}`,
+          company_name: val(c, "company_name") || val(c, "company"),
+          contact_name: val(c, "contact_name"),
+          email: val(c, "email"),
+          industry: val(c, "industry"),
+          location: val(c, "location"),
+          capital_need: val(c, "capital_need"),
+          status: "available"
         }
+      })
 
-        const headers = lines[0]
-          .split(",")
-          .map(h => h.trim().replace(/"/g, "").toLowerCase())
+      const supabase = getSupabase()
+      await supabase.from("leads").insert(batch)
+      await loadData()
 
-        const col = (row: string[], name: string) => {
-          const i = headers.indexOf(name)
-          return i === -1 ? "" : (row[i] || "").replace(/"/g, "").trim()
-        }
-
-        const newLeads: Record<string, string>[] = []
-
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(",")
-
-          newLeads.push({
-            lead_id: `LEAD-${Date.now()}-${i}`,
-            company_name: col(cols, "company_name") || col(cols, "company") || "Unknown",
-            contact_name: col(cols, "contact_name") || col(cols, "contact"),
-            email: col(cols, "email"),
-            phone: col(cols, "phone"),
-            industry: col(cols, "industry"),
-            location: col(cols, "location"),
-            company_size: col(cols, "company_size"),
-            revenue_range: col(cols, "revenue_range"),
-            capital_need: col(cols, "capital_need"),
-            status: "available"
-          })
-        }
-
-        if (!newLeads.length) {
-          showMsg("No rows found", "error")
-          return
-        }
-
-        const supabase = getSupabase()
-        const { error } = await supabase.from("leads").insert(newLeads)
-
-        if (error) {
-          showMsg(error.message, "error")
-          return
-        }
-
-        await fetchData()
-        showMsg(`Imported ${newLeads.length} leads`, "success")
-      } catch {
-        showMsg("CSV parse failed", "error")
-      }
+      flash(`Imported ${batch.length} leads`)
     }
 
     reader.readAsText(file)
     e.target.value = ""
   }
 
-  async function handleGrant() {
-    const amount = Number(grantAmount)
-    if (!grantUserId || amount <= 0) return
+  async function grantCredits() {
+    const amt = Number(grantAmount)
+    if (!grantUserId || amt <= 0) return
 
-    const supabase = getSupabase()
-    const user = users.find(u => u.id === grantUserId)
-
-    const newCredits = (user?.credits || 0) + amount
-
-    await supabase
-      .from("user_profiles")
-      .update({ credits: newCredits })
-      .eq("id", grantUserId)
-
-    await supabase.from("credit_transactions").insert({
-      user_id: grantUserId,
-      amount,
-      type: "grant",
-      description: `Admin granted ${amount} credits`
-    })
-
-    setGrantUserId("")
-    setGrantAmount("")
-    await fetchData()
-
-    showMsg("Credits granted", "success")
-  }
-
-  async function handleLogout() {
-    const supabase = getSupabase()
-    await supabase.auth.signOut()
-    router.push("/login")
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin h-10 w-10 rounded-full border-b-2 border-purple-600" />
-      </div>
-    )
-  }
-
-  const clientUsers = users.filter(u => u.role === "client")
-  const totalCredits = users.reduce((sum, u) => sum + (u.credits || 0), 0)
-
-  return (
-    <div className="min-h-screen bg-gray-50 p-6">
-
-      {msg && (
-        <div className={`fixed top-4 right-4 px-5 py-3 rounded-xl text-white ${
-          msgType === "success" ? "bg-green-500" : "bg-red-500"
-        }`}>
-          {msg}
-        </div>
-      )}
-
-      <div className="flex justify-between mb-6">
-        <h1 className="text-2xl font-bold">Admin Panel</h1>
-        <button onClick={handleLogout} className="flex items-center gap-2 text-red-600">
-          <LogOut className="w-4 h-4" /> Logout
-        </button>
-      </div>
-
-      <div className="grid md:grid-cols-3 gap-4 mb-6">
-        <Stat title="Total Leads" value={leads.length} icon={<Database />} />
-        <Stat title="Clients" value={clientUsers.length} icon={<Users />} />
-        <Stat title="Credits" value={totalCredits} icon={<Coins />} />
-      </div>
-
-      <input ref={fileRef} type="file" accept=".csv" hidden onChange={handleCSV} />
-
-      <button
-        onClick={() => fileRef.current?.click()}
-        className="mb-6 bg-green-600 text-white px-5 py-2 rounded-xl flex gap-2"
-      >
-        <Upload className="w-4 h-4" /> Upload CSV
-      </button>
-
-      <div className="bg-white rounded-xl p-4 mb-6">
-        <select
-          value={grantUserId}
-          onChange={e => setGrantUserId(e.target.value)}
-          className="border px-3 py-2 rounded mr-2"
-        >
-          <option value="">Pick user</option>
-          {clientUsers.map(u => (
-            <option key={u.id} value={u.id}>{u.name}</option>
-          ))}
-        </select>
-
-        <input
-          type="number"
-          value={grantAmount}
-          onChange={e => setGrantAmount(e.target.value)}
-          className="border px-3 py-2 rounded mr-2 w-28"
-          placeholder="Credits"
-        />
-
-        <button onClick={handleGrant} className="bg-purple-600 text-white px-4 py-2 rounded">
-          Grant
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function Stat({ title, value, icon }: { title: string; value: number; icon: JSX.Element }) {
-  return (
-    <div className="bg-white p-4 rounded-xl flex justify-between items-center">
-      <div>
-        <p className="text-sm text-gray-500">{title}</p>
-        <p className="text-2xl font-bold">{value}</p>
-      </div>
-      <div className="text-purple-600">{icon}</div>
-    </div>
-  )
-}
+    const supabase = getSupaba
