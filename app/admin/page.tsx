@@ -109,7 +109,7 @@ export default function AdminPage() {
         const lines = text.split("\n").filter(l => l.trim())
 
         if (lines.length < 2) {
-          showMsg("CSV must have header + rows.", "error")
+          showMsg("CSV must include headers + rows", "error")
           return
         }
 
@@ -143,12 +143,11 @@ export default function AdminPage() {
         }
 
         if (!newLeads.length) {
-          showMsg("No rows found.", "error")
+          showMsg("No rows found", "error")
           return
         }
 
         const supabase = getSupabase()
-
         const { error } = await supabase.from("leads").insert(newLeads)
 
         if (error) {
@@ -159,7 +158,7 @@ export default function AdminPage() {
         await fetchData()
         showMsg(`Imported ${newLeads.length} leads`, "success")
       } catch {
-        showMsg("CSV parse failed.", "error")
+        showMsg("CSV parse failed", "error")
       }
     }
 
@@ -230,4 +229,57 @@ export default function AdminPage() {
         </button>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-4 mb-
+      <div className="grid md:grid-cols-3 gap-4 mb-6">
+        <Stat title="Total Leads" value={leads.length} icon={<Database />} />
+        <Stat title="Clients" value={clientUsers.length} icon={<Users />} />
+        <Stat title="Credits" value={totalCredits} icon={<Coins />} />
+      </div>
+
+      <input ref={fileRef} type="file" accept=".csv" hidden onChange={handleCSV} />
+
+      <button
+        onClick={() => fileRef.current?.click()}
+        className="mb-6 bg-green-600 text-white px-5 py-2 rounded-xl flex gap-2"
+      >
+        <Upload className="w-4 h-4" /> Upload CSV
+      </button>
+
+      <div className="bg-white rounded-xl p-4 mb-6">
+        <select
+          value={grantUserId}
+          onChange={e => setGrantUserId(e.target.value)}
+          className="border px-3 py-2 rounded mr-2"
+        >
+          <option value="">Pick user</option>
+          {clientUsers.map(u => (
+            <option key={u.id} value={u.id}>{u.name}</option>
+          ))}
+        </select>
+
+        <input
+          type="number"
+          value={grantAmount}
+          onChange={e => setGrantAmount(e.target.value)}
+          className="border px-3 py-2 rounded mr-2 w-28"
+          placeholder="Credits"
+        />
+
+        <button onClick={handleGrant} className="bg-purple-600 text-white px-4 py-2 rounded">
+          Grant
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Stat({ title, value, icon }: { title: string; value: number; icon: JSX.Element }) {
+  return (
+    <div className="bg-white p-4 rounded-xl flex justify-between items-center">
+      <div>
+        <p className="text-sm text-gray-500">{title}</p>
+        <p className="text-2xl font-bold">{value}</p>
+      </div>
+      <div className="text-purple-600">{icon}</div>
+    </div>
+  )
+}
