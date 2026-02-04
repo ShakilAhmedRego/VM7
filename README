@@ -1,0 +1,11 @@
+# VerifiedMeasure Platform
+
+Next.js + Supabase lead distribution platform.
+
+## Setup
+- Add Supabase env vars in Vercel
+- Run SQL in Supabase SQL editor
+- Deploy
+
+## Tech
+Next.js, Tailwind, Supabase
